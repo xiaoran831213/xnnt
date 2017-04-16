@@ -112,7 +112,7 @@ class Base(object):
         x = S(np.zeros((bsz * 2, nwk.dim[0]), 'f') if x is None else x)
         y = x if y is None else S(y)
         u = x if u is None else S(u)
-        v = u if v is None else S(v)
+        v = y if v is None else S(v)
         self.x, self.y, self.u, self.v = x, y, u, v
 
         # -------- construct trainer function -------- *
@@ -120,7 +120,7 @@ class Base(object):
         x = T.tensor(name='x', dtype=x.dtype, broadcastable=x.broadcastable)
         y = T.tensor(name='y', dtype=y.dtype, broadcastable=y.broadcastable)
         yhat = nwk(x)
-
+        
         u = T.tensor(name='u', dtype=u.dtype, broadcastable=u.broadcastable)
         v = T.tensor(name='v', dtype=v.dtype, broadcastable=v.broadcastable)
 
