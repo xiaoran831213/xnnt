@@ -30,8 +30,11 @@ def CE(y, z):
     dimension denotes the value.
 
     """
-    _ = -z * T.log(y) - (1 - z) * T.log(1 - y)
-    return T.sum(_, range(1, _.ndim))
+    u = -z * T.log(y) - (1 - z) * T.log(1 - y)
+    if u.ndim > 1:
+        return T.sum(u, range(1, u.ndim))
+    else:
+        return u
 
 
 def CM(y, z):
@@ -57,8 +60,8 @@ def L2(y, z=None):
 
     The first dimension denote sampling units.
     """
-    u = y - z if z else y
-    return T.sqrt(T.sum(u**2, -1))
+    u = y if z is None else y - z
+    return T.sum(u**2, range(1, u.ndim))
 
 
 def L1(y, z=None):
