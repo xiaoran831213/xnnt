@@ -75,12 +75,6 @@ def L1(y, z=None):
     return T.sum(T.abs_(u), -1)
 
 
-def L0(y, z=None, thd=1e-06):
-    """ build symbolic expression of L0 norm. """
-    u = y - z if z else y
-    return T.sum((T.abs_(u) > thd), -1, FX)
-
-
 def BH(y, z):
     """ binary hinge loss. Assume the lables are binary coded by {0, 1}.
     """
@@ -88,6 +82,59 @@ def BH(y, z):
     b = 2.0 * y - 1             # + -> 1, - -> -1
     x = a * b                   # + -> correct, - -> loss
     return 0.5 * (T.abs_(x) - x)
+
+
+def cov(x, y=None):
+    """ build expression of covariance. """
+    # make sure x is a matrix
+    if x.ndim < 2:
+        x = T.reshape(x, [x.size, 1])
+    else:
+        x = T.reshape(x, [x.shape[0], -1])
+
+    if y is None:
+        m = x
+    else:
+        # make sure y is a matrix
+        if y.ndim < 2:
+            y = T.reshape(y, [y.size, 1])
+        else:
+            y = T.reshape(y, [y.shape[-1], -1])
+        m = T.concatenate([x, y], 1)
+
+    # estimate covariance
+    u = m - T.mean(m, 0, keepdims=True)
+    r = T.dot(u.T, u) / (u.shape[0] - 1)
+    return T.squeeze(r)
+
+
+def mcr(x, y):
+    """ build expression of mean correlation with respect to all features.
+    The first dimension of {x} and {y} are treated assample index, the rest
+    span the feature space.
+    Mean correlation of all features usually measures prediction performance
+    for real continuous target variables.
+    """
+    # make sure x is a matrix, and also *symbolic*
+    if x.ndim < 2:
+        x = T.reshape(x, [x.size, 1])
+    else:
+        x = T.reshape(x, [x.shape[0], -1])
+
+    # make sure y is a matrix, and also *symbolic*
+    if y.ndim < 2:
+        y = T.reshape(y, [y.size, 1])
+    else:
+        y = T.reshape(y, [y.shape[0], -1])
+
+    # z-scores of every feature for both x and y
+    zx = (x - T.mean(x, 0, keepdims=True))/T.std(x, 0, keepdims=True)
+    zy = (y - T.mean(y, 0, keepdims=True))/T.std(y, 0, keepdims=True)
+
+    # row mean of z-score product are (P) correlations, further, the column
+    # mean of P correlations give the mean correlation.
+    rr = (zx * zy).mean()
+    return rr
 
 
 # --------  squashers  -------- #

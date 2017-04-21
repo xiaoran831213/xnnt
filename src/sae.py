@@ -72,7 +72,7 @@ class SAE(Cat):
         returns: the used trainer {class: xnnt.tnr.bas}.
         """
         # the trainer class
-        from xnnt.tnr.bas import Base as Tnr
+        from xnnt.tnr.cmb import Comb as Tnr
 
         # layer-wise greedy pre-training (incremental).
         if gdy > 0:

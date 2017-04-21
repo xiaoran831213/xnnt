@@ -39,7 +39,7 @@ class Base(object):
         ** dpc: dot product cap, preventing numerical explosion
 
         ** err: expression builder for the computation of training error
-        between the network output {yhat} and the label {y}. the expression
+        between the network output {pred} and the label {y}. the expression
         must evaluate to a scalar.
 
         ** reg: expression builder for the computation of weight panalize
@@ -119,13 +119,18 @@ class Base(object):
         # 1) symbolic expressions
         x = T.tensor(name='x', dtype=x.dtype, broadcastable=x.broadcastable)
         y = T.tensor(name='y', dtype=y.dtype, broadcastable=y.broadcastable)
-        yhat = nwk(x)
-        
         u = T.tensor(name='u', dtype=u.dtype, broadcastable=u.broadcastable)
         v = T.tensor(name='v', dtype=v.dtype, broadcastable=v.broadcastable)
 
+        # prediction
+        pred = nwk(x)           # generic
+
+        # mean correlation between testing outcome {v} and that predicted
+        # from testing input {u}.
+        vcor = exb.mcr(nwk(x), y)
+        
         # list of symbolic parameters to be tuned
-        pars = parms(yhat)
+        pars = parms(pred)
 
         # unlist symbolic weights into a vector
         vwgt = T.concatenate([p.flatten() for p in pars if p.name == 'w'])
@@ -138,7 +143,7 @@ class Base(object):
         # e.g. voxels in an MRI region, and SNPs in a gene.
         # The objective function, err, returns a scalar of training loss, it
         # can be the L1, L2 norm and CE.
-        erro = err(yhat, y).mean()
+        erro = err(pred, y).mean()
 
         # the sum of weights calculated for weight decay.
         wsum = reg(vwgt)
@@ -202,6 +207,7 @@ class Base(object):
         # weights, and parameters
         self.wsum = F([], wsum, name="wsum")
         self.gsup = F([], gsup, name="gsup", givens=dts)
+
         # * -------- done with trainer functions -------- *
 
         # * -------- validation functions -------- *
@@ -212,9 +218,11 @@ class Base(object):
         else:
             vts = {x: self.u, y: self.v}
         self.verr = F([], erro, name="verr", givens=vts)
+        # validation correlation performance
+        self.vcor = F([], vcor, name="vcor", givens=vts)
 
         # * ---------- logging and recording ---------- *
-        hd, skip = [], ['step', 'gvec', 'dots', 'dvec']
+        hd, skip = [], ['step', 'gvec']
         for k, v in vars(self).items():
             if k.startswith('__') or k in skip:
                 continue
@@ -239,22 +247,21 @@ class Base(object):
 
         # printing format
         self.__pfmt__ = (
-            '{ep:04d}: {tcst:.1e} = {terr:.1e} + {lmd:.1e}*{wsum:.1f}'
-            '|{verr:.1e}, {gsup:.2e}, {lrt:.2e}')
+            '{ep:04d}: {tcst:.1e} = {terr:.1e} + {lmd:.1e}*{wsum:.1e}'
+            '|{verr:.1e}, {gsup:.2e}, {vcor:.2e}, {lrt:.2e}')
 
     # -------- helper funtions -------- *
     def nbat(self):
         return self.x.get_value().shape[-2] // self.bsz.get_value()
 
-    def yhat(self, x=None, evl=True):
+    def pred(self, input=None, evl=True):
         """
-        Predicted outcome given input {x}. By default, use the training samples
-        as input.
-        x: network input
+        Predicted outcome given {input}. By default, use the training samples.
+        input: network input
         evl: evaludate the expression (default = True)
         """
-        yhat = self.nwk(self.x if x is None else x)
-        return yhat.eval() if evl else yhat
+        hat = self.nwk(self.x if input is None else input)
+        return hat.eval() if evl else hat
 
     def __rpt__(self):
         """ report current status. """
@@ -412,7 +419,7 @@ class Base(object):
             rc1 = rc
 
         # numpy types from python native types
-        tp = {float: 'f4', int: 'i4'}
+        tp = {float: 'f4', int: 'i4', bool: 'b'}
         tp = np.dtype([(k, tp[type(v)]) for k, v in h0.items() if fc1(k)])
 
         # numpy data
