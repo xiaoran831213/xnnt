@@ -75,7 +75,7 @@ class Base(object):
         self.hte = kwd.get('hte', 1e-3)  # 1. low training error
         self.hgd = kwd.get('htg', 1e-7)  # 2. low gradient
         self.hlr = kwd.get('hlr', 1e-7)  # 3. low learning rate
-        self.hvp = kwd.get('hvp', 1e+2)  # 4. out of validation patients
+        self.hvp = kwd.get('hvp', 100)  # 4. out of validation patients
         self.hlt = 0
 
         # current epoch index, use int64
