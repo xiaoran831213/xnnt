@@ -290,7 +290,7 @@ class Base(object):
             return True
         
         # no training histoty, do not stop.
-        if len(self.__hist__) < 1L:
+        if len(self.__hist__) < 1:
             return False
 
         # pull out the latest history

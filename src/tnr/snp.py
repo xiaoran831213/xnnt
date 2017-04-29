@@ -25,7 +25,7 @@ class Snap(object):
         else:
             ret = dict()
         skp = Snap.__skip__
-        for k, v in vars(self).iteritems():
+        for k, v in vars(self).items():
             if k in skp or callable(v) or k.startswith('__'):
                 continue
             if isinstance(v, TSV):
@@ -41,7 +41,7 @@ class Snap(object):
         """ restore a snap shot. """
         key = -1 if key is None else key
         ret, skp = self.__snap__[key], Snap.__skip__
-        for k, v in vars(self).iteritems():
+        for k, v in vars(self).items():
             if k in skp or callable(v) or k not in ret:
                 continue
             if isinstance(v, TSV):
