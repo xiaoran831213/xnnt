@@ -72,6 +72,6 @@ class Bold(Snap, Base):
         if hlt:
             # restore the state with lowest validation error.
             self.snap('meov', 'r', crop_hist=False)
-            self.hlt = 2  # increased validation error.
+            self.hlt = 3  # increased validation error.
             return True
         return super(Bold, self).__stop__()
