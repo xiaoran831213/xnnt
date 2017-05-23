@@ -180,9 +180,7 @@ class Pcp(Nnt):
 
         # softmax
         if self.s == 'softmax':
-            v = T.transpose(_, (0, 2, 1))
-            _, u = sc(exb.softmax, sequences=[v])
-            _ = T.transpose(_, (0, 2, 1))
+            _ = exb.softmax(_)
 
         # relu activation
         if self.s == 'relu':

@@ -90,7 +90,7 @@ class Nnt(list):
         else:
             t = T.sharedvar.TensorSharedVariable
         return dict(
-            (k, v) for k, v in vars(self).viewitems() if isinstance(v, t))
+            (k, v) for k, v in vars(self).items() if isinstance(v, t))
 
     def __wreg__(self, **kwd):
         """ sallowly list weight parameters. weights will later be subjected

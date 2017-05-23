@@ -32,7 +32,7 @@ def CE(y, z):
     """
     u = -z * T.log(y) - (1 - z) * T.log(1 - y)
     if u.ndim > 1:
-        return T.sum(u, range(1, u.ndim))
+        return T.sum(u, tuple(range(1, u.ndim)))
     else:
         return u
 
@@ -48,7 +48,7 @@ def CM(y, z):
     categories, or levels, of each feature.
     """
     _ = -z * T.log(y)
-    return T.sum(_, range(1, _.ndim))
+    return T.sum(_, tuple(range(1, _.ndim)))
 
     
 def L2(y, z=None):
@@ -214,10 +214,25 @@ class Logistic:
         return 'logistic'
 
 
+class Softmax:
+    """ softmax of multiple dimensions. """
+    def __init__(self):
+        pass
+
+    def __call__(self, x):
+        """ softmax of multiple dimensions.
+        x: input of shape (N, C, P), where N indices the samples; C indices
+        the category levels; P indices the features, that is, each feature
+        has C levels.
+        """
+        e = T.exp(x - x.max(1, keepdims=True))
+        return e / e.sum(1, keepdims=True)
+
+
 logistic = Logistic()
 relu = Relu()
 elliot = Elliot()
-softmax = T.nnet.softmax
+softmax = Softmax()
 sigmoid = T.nnet.sigmoid
 softplus = T.nnet.softplus
 
