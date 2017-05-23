@@ -6,35 +6,42 @@ class SAE(Cat):
     """
     Stacked Auto Encoder
     """
-    def __init__(self, AEs):
+    def __init__(self, AEs=None, **kwd):
         """
         Initialize the stacked auto encoder by a list of code dimensions.
         The weight and bias terms in the AEs are initialized by default rule.
-        -------- parameters --------
-        AEs: a list of autoencoders
+        -------- optional parameters --------
+        -- AEs: a list of autoencoders.
+        ** dim: a list of dimensions to create autoencoders.
         """
-        """ the default view of the stacked autoencoders"""
-        sa = AEs
-        """ the encoder view of the stacked autoencoders """
-        ec = Cat([a.ec for a in sa])
-        """ the decoder view of the stacked autoencoders """
-        dc = Cat([a.dc for a in reversed(sa)])
+        super(SAE, self).__init__()
+        self.sa = []
+        self.ec = Cat()
+        self.dc = Cat()
+        self.stack(AEs, **kwd)
 
-        self.sa = sa  # default view
-        self.ec = ec  # encoder view
-        self.dc = dc  # decoder view
-
-        nts = []
-        nts.extend(ec)
-        nts.extend(dc)
-        super(SAE, self).__init__(nts)
-
-    @staticmethod
-    def from_dim(dim, **kwd):
-        """ create SAE by specifying encoding dimensions
-        dim: a list of encoding dimensions
+    def stack(self, AEs=[], **kwd):
+        """ stack a list of AEs on top of the current SAE.
+        AEs: autoencoders to be stacked, can be an SAE form, or a list of
+        dimensions to build an SAE, otherwise no action will be taken.
         """
-        return SAE([AE(d, **kwd) for d in zip(dim[:-1], dim[1:])])
+        # list of AE from an SAE, or dimension numbers.
+        if AEs and all([isinstance(a, int) for a in AEs]):
+            sa = [AE(d, **kwd) for d in zip(AEs[:-1], AEs[1:])]
+        elif isinstance(AEs, SAE):
+            sa = AEs.sa
+        else:
+            sa = AEs
+
+        # list of encoders and decoders to be stacked
+        ec = [a.ec for a in sa]
+        dc = [a.dc for a in reversed(sa)]
+
+        # stack them now.
+        self.sa.extend(sa)
+        self.ec.extend(ec)
+        self.dc[:0] = dc
+        self[:] = self.ec + self.dc
 
     def sub(self, start=None, stop=None, copy=False):
         """ get sub stack from of lower encoding stop

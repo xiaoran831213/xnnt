@@ -8,9 +8,8 @@ from theano import scan as sc
 
 class Pcp(Nnt):
     """
-    A Perceptron, which is the full linear recombination of the input
-    elements and a bias(or intercept), followed by an per-element non-
-    linear transformation(usually sigmoid).
+    A Perceptron, which is a full linear combination of the input entries
+    and an intercept, followed by an per-entry transform (e.g. sigmoid).
     """
     def __init__(self, dim, w=None, b=None, c=None, s=None, **kwd):
         """
