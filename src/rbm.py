@@ -1,158 +1,208 @@
-"""This tutorial introduces restricted boltzmann machines (RBM) using Theano.
-
-Boltzmann Machines (BMs) are a particular form of energy-based model which
-contain hidden variables. Restricted Boltzmann Machines further restrict BMs
-to those without visible-visible and hidden-hidden connections.
-"""
-import timeit
-
-try:
-    import PIL.Image as Image
-except ImportError:
-    import Image
-
-import numpy
-
-import theano
-import theano.tensor as T
-import os
-
-from theano.tensor.shared_randomstreams import RandomStreams
-
-from utils import tile_raster_images
-from logistic_sgd import load_data
+import numpy as np
+from xnnt.hlp import S, C
+from xnnt.nnt import Nnt
+from xnnt import exb
+from theano import tensor as T
+from theano import scan as sc
 
 
-# start-snippet-1
-class RBM(object):
-    """Restricted Boltzmann Machine (RBM)  """
-
-    def __init__(self,
-                 input=None,
-                 n_visible=784,
-                 n_hidden=500,
-                 W=None,
-                 hbias=None,
-                 vbias=None,
-                 numpy_rng=None,
-                 theano_rng=None):
+class Pcp(Nnt):
+    """
+    A Perceptron, which is a full linear combination of the input entries
+    and an intercept, followed by an per-entry transform (e.g. sigmoid).
+    """
+    def __init__(self, dim, w=None, b=None, c=None, s=None, **kwd):
         """
-        RBM constructor. Defines the parameters of the model along with
-        basic operations for inferring hidden from visible (and vice-versa),
-        as well as for performing CD updates.
+        Initialize the perceptron by specifying the the dimension of input
+        and output.
+        The constructor also receives symbolic variables for the input,
+        weights and bias. Such a symbolic variables are useful when, for
+        example, the input is the result of some computations, or when
+        the weights are shared between the layers
 
-        :param input: None for standalone RBMs or symbolic variable if RBM is
-        part of a larger graph.
+        -------- parameters --------
+        dim: a 2-tuple of input/output dimensions
+        d_1: specify the input dimension P, or # of visible units
+        d_2: specify the output dimension Q, or # of hidden units
 
-        :param n_visible: number of visible units
+        w: (optional) weight of dimension (P, Q), randomly initialized
+        if not given.
 
-        :param n_hidden: number of hidden units
+        b: (optional) bias of output (hidden) units, of dimension Q,
+        filled with 0 by default.
+        c: (optional) bias of input (visible) units, of dimension P,
+        filled with 0 by default.
+        this bias vector is needed by energy based interpretation.
 
-        :param W: None for standalone RBMs or symbolic variable pointing to a
-        shared weight matrix in case RBM is part of a DBN network; in a DBN,
-        the weights are shared between RBMs and layers of a MLP
-
-        :param hbias: None for standalone RBMs or symbolic variable pointing
-        to a shared hidden units bias vector in case RBM is part of a
-        different network
-
-        :param vbias: None for standalone RBMs or a symbolic variable
-        pointing to a shared visible units bias
+        s: (optional) nonlinear tranformation of the weighted sum, by
+        default the sigmoid is used.
+        To suppress nonlinearity, specify 1 instead.
         """
+        super(Pcp, self).__init__(**kwd)
 
-        self.n_visible = n_visible
-        self.n_hidden = n_hidden
+        # I/O dimensions
+        self.dim = dim
 
-        if numpy_rng is None:
-            # create a number generator
-            numpy_rng = numpy.random.RandomState(1234)
+        # note : W' was written as `W_prime` and b' as `b_prime`
+        """
+        # W is initialized with `initial_W` which is uniformely sampled
+        # from -4*sqrt(6./(n_vis+n_hid)) and
+        # 4 * sqrt(6./(n_hid+n_vis))the output of uniform if
+        # converted using asarray to dtype
+        # theano.config.floatX so that the code is runable on GPU
+        """
+        # the activation/squarshing function, the defaut is sigmoid
+        if s is None:
+            s = 'sigmoid'
+        self.s = str(s).lower()
 
-        if theano_rng is None:
-            theano_rng = RandomStreams(numpy_rng.randint(2**30))
+        # levels of the output, the defaut is 2 (binary data)
+        lvl = kwd.get('lvl', 2)
 
-        if W is None:
-            # W is initialized with `initial_W` which is uniformely
-            # sampled from -4*sqrt(6./(n_visible+n_hidden)) and
-            # 4*sqrt(6./(n_hidden+n_visible)) the output of uniform if
-            # converted using asarray to dtype theano.config.floatX so
-            # that the code is runable on GPU
-            initial_W = numpy.asarray(
-                numpy_rng.uniform(
-                    low=-4 * numpy.sqrt(6. / (n_hidden + n_visible)),
-                    high=4 * numpy.sqrt(6. / (n_hidden + n_visible)),
-                    size=(n_visible, n_hidden)),
-                dtype=theano.config.floatX)
-            # theano shared variables for weights and biases
-            W = theano.shared(value=initial_W, name='W', borrow=True)
+        # category of the output, for softmax squarsh only
+        cat = kwd.get('cat', 2)
 
-        if hbias is None:
-            # create shared variable for hidden units bias
-            hbias = theano.shared(
-                value=numpy.zeros(
-                    n_hidden, dtype=theano.config.floatX),
-                name='hbias',
-                borrow=True)
+        if w is None:
+            w = self.__nrng__.uniform(
+                low=-4 * np.sqrt(6. / (dim[0] + dim[1])),
+                high=4 * np.sqrt(6. / (dim[0] + dim[1])),
+                size=(cat, dim[0], dim[1]))
+            w = S(w, 'w')
 
-        if vbias is None:
-            # create shared variable for visible units bias
-            vbias = theano.shared(
-                value=numpy.zeros(
-                    n_visible, dtype=theano.config.floatX),
-                name='vbias',
-                borrow=True)
+        if b is None:
+            b = np.zeros(dim[1])
+            b = S(b, 'b')
 
-        # initialize input layer for standalone RBM or layer0 of DBN
-        self.input = input
-        if not input:
-            self.input = T.matrix('input')
+        if c is None:
+            c = np.zeros(dim[1])
+            c = S(c, 'c')
 
-        self.W = W
-        self.hbias = hbias
-        self.vbias = vbias
-        self.theano_rng = theano_rng
-        # **** WARNING: It is not a good idea to put things in this list
-        # other than shared variables created in this function.
-        self.params = [self.W, self.hbias, self.vbias]
-        # end-snippet-1
+        self.w = w            # connections (weights) matrix
+        self.b = b            # bias of the hiddens
+        self.c = c            # bias of the visibles
 
-    def free_energy(self, v_sample):
-        ''' Function to compute the free energy '''
-        wx_b = T.dot(v_sample, self.W) + self.hbias
-        vbias_term = T.dot(v_sample, self.vbias)
-        hidden_term = T.sum(T.log(1 + T.exp(wx_b)), axis=1)
-        return - hidden_term - vbias_term
+    # a perceptron is represented by the nonlinear funciton and dimensions
+    def __repr__(self):
+        return '{}({}x{})'.format('RBM', self.dim[0], self.dim[1])
 
-    def propup(self, vis):
-        '''This function propagates the visible units activation upwards to
-        the hidden units
+    def __expr__(self, x):
+        """ build symbolic expression of {y} given {x}.
+        For a RBM, it is the full linear recombination of the
+        visible units {v} (plus a bias {b}), followed by an
+        entry-wise sigmoid.
+        """
+        # affin transformation
+        _ = T.dot(x, self.w) + self.b
 
-        Note that we return also the pre-sigmoid activation of the
-        layer. As it will turn out later, due to how Theano deals with
-        optimizations, this symbolic variable will be needed to write
-        down a more stable computational graph (see details in the
-        reconstruction cost function)
+        # activation
+        _ = exb.sigmoid(_)
+        _.name = 's(xw+b)'
 
+        return _
+
+    def __free_energy__(self, x, family='b'):
+        ''' symbolic expression of free energy given fixed assignment on
+        visible units (x).
+        For now it only works for binary units.
+
+        x: the P-vector of visible units at the bottom, linked to the input.
+        h: the Q-vector of hidden units at the top, linked to the label.
+
+        W: the Q * P weight matrix, whose (i,j) element gives the negative
+        engery contributed by the ith visible and and the jth hidden units
+        together.
+
+        b: the Q-vector of bias for hidden units, whose j th. element gives
+        the negative energy contributed by the j th. hidden unit.
+
+        c: the P-vector of bias for visible units, whose i th. element gives
+        the negative engery contributed by the i th. visible unit.
+
+        # total system engery:
+        - E(x, h) = c'x + b'h + h'Wx
+
+        # some intermediate terms:
+        # energy of the visibles, which is fixed because we fix x:
+        # E(x) = c'x
+
+        # integration of energy contributed by the j th. hidden unit over its
+        # support. for binary units, h_j only takes value from {0, 1}.
+        # \int_{h_j} E(h_j) d{h_j} = sum_{h_j}{e^{h_j(c_j + w_j x)}
+        # where w_j is the j th. row of the connection matrix, and c_j is the
+        # bias of j th. hidden unit.
+
+        # integration or sum of engery contributed by all hidden units, is
+        # the direct sum of individual units, because in a RBM all hidden
+        # units are not connected.
+        # sum(he_) = sum(j, sum(hej))
+
+        FE(x) = -ve - /sum_i{/log{/sum_{h_i}{e^{h_i(c_i + W_i %*% x)}}}}.
+
+        For binary units, it is simplified since h_i only takes {0, 1}:
+        FE(x) = -ve - /sum_i{/log{(1 + e^(c_i + W_i %*% x))}
         '''
-        pre_sigmoid_activation = T.dot(vis, self.W) + self.hbias
-        return [pre_sigmoid_activation, T.nnet.sigmoid(pre_sigmoid_activation)]
+        # engery contribution of active hidden units (h == [1])
+        he1 = T.dot(x, self.w) + self.b  # energy when h_j == 1
+        # he0 = 0                        # energy when h_j == 0
 
-    def sample_h_given_v(self, v0_sample):
-        ''' This function infers state of hidden units given visible units '''
+        # sum over all instances and all dimensions of h
+        # he_ = T.sum(T.log(T.exp(he0) + T.exp(he1)), axis=-1)
+        he_ = T.sum(T.log(1 + T.exp(he1)), axis=-1)
+
+        # engery contributed by visible x
+        ve_ = T.dot(x, self.c)
+
+        # total negative energy
+        return -ve_ - he_
+
+    def propup(self, x0):
+        ''' This function propagates the visible units activation upwards
+        to the hidden units
+
+        x0: N * P instances of visible units, one row per observation.
+
+        returns:
+        [0] ay: the activation of hidden units
+        [1] py: the mean of hidden units, for a binary case, it is also the
+        probability of activation, that is, Prb(y_j==1) for j = 1 .. Q
+        
+        Also returned is the pre-sigmoid activation of the layer. As it will
+        turn out later, due to how Theano deals with
+        optimizations, this symbolic variable will be needed to write down a
+        more stable computational graph (see details in the reconstruction
+        cost function)
+        '''
+        ay = T.dot(x0, self.w) + self.b
+        py = T.nnet.sigmoid(ay)
+        return [ay, py]
+
+    def yox(self, x0):
+        ''' Hidden units of Visible units, or, y of x. the function infers state
+        of hidden units (y) given visible units (x).
+        x: instance of visible units, one row per observation.
+
+        returns:
+        [0] ay: the raw activation of hidden units
+        [1] py: the mean of hidden units, for a binary case, it is also the
+        probability of activation, that is, P(y_j == 1) for j = 1 .. Q
+        [2] sy: the sampled hidden units.
+        '''
         # compute the activation of the hidden units given a sample of
         # the visibles
-        pre_sigmoid_h1, h1_mean = self.propup(v0_sample)
+        ay, py = self.propup(x0)
         # get a sample of the hiddens given their activation
         # Note that theano_rng.binomial returns a symbolic sample of dtype
         # int64 by default. If we want to keep our computations in floatX
         # for the GPU we need to specify to return the dtype floatX
-        h1_sample = self.theano_rng.binomial(
-            size=h1_mean.shape, n=1, p=h1_mean, dtype=theano.config.floatX)
-        return [pre_sigmoid_h1, h1_mean, h1_sample]
+        sy = self.__trng__.binomial(
+            size=py.shape, n=1, p=py, dtype='float32')
+        return [ay, py, sy]
 
-    def propdown(self, hid):
-        '''This function propagates the hidden units activation downwards to
+    def propdown(self, y0):
+        ''' This function propagates the hidden units activation downwards to
         the visible units
 
+        y0: N * Q instances of hidden units, one row per observation.
         Note that we return also the pre_sigmoid_activation of the
         layer. As it will turn out later, due to how Theano deals with
         optimizations, this symbolic variable will be needed to write
@@ -160,343 +210,133 @@ class RBM(object):
         reconstruction cost function)
 
         '''
-        pre_sigmoid_activation = T.dot(hid, self.W.T) + self.vbias
-        return [pre_sigmoid_activation, T.nnet.sigmoid(pre_sigmoid_activation)]
+        ax = T.dot(y0, self.w.T) + self.c
+        px = T.nnet.sigmoid(ax)
+        return [ax, px]
 
-    def sample_v_given_h(self, h0_sample):
-        ''' This function infers state of visible units given hidden units '''
+    def xoy(self, y0):
+        ''' visible units of hidden units, x of y. this function infers state
+        of visible units, given hidden units y0.
+        y0: instance of hidden units, one row per observation.
+
+        returns:
+        [0] ax: the raw activation of visible units
+        [1] px: the mean of visible units, for binary cases, it is also the
+        probability of activation, that is, P(x_i == 1) for i = 1 .. P
+        [2] x1: the sampled visible units at.
+        '''
         # compute the activation of the visible given the hidden sample
-        pre_sigmoid_v1, v1_mean = self.propdown(h0_sample)
+        ax, px = self.propdown(y0)
         # get a sample of the visible given their activation
         # Note that theano_rng.binomial returns a symbolic sample of dtype
         # int64 by default. If we want to keep our computations in floatX
         # for the GPU we need to specify to return the dtype floatX
-        v1_sample = self.theano_rng.binomial(
-            size=v1_mean.shape, n=1, p=v1_mean, dtype=theano.config.floatX)
-        return [pre_sigmoid_v1, v1_mean, v1_sample]
+        x1 = self.__trng__.binomial(
+            size=px.shape, n=1, p=px, dtype='float32')
+        return [ax, px, x1]
 
-    def gibbs_hvh(self, h0_sample):
-        ''' This function implements one step of Gibbs sampling,
-            starting from the hidden state'''
-        pre_sigmoid_v1, v1_mean, v1_sample = self.sample_v_given_h(h0_sample)
-        pre_sigmoid_h1, h1_mean, h1_sample = self.sample_h_given_v(v1_sample)
-        return [
-            pre_sigmoid_v1, v1_mean, v1_sample, pre_sigmoid_h1, h1_mean,
-            h1_sample
-        ]
+    def yxy(self, y0):
+        ''' build symbolic expression of one step of Gibbs sampling,
+        from the hidden state y0, to the intermediate visible state
+        x?, then to the next hidden state y1.
+        y0: hidden units at t0
+        returns:
+        [0] ax: raw activation of visible units due to y0
+        [1] px: mean activation of visible units
+        [2] x1: sampled visible units
+        [3] ay: raw activation of hidden units at t1
+        [4] py: mean activation of hidden units at t1
+        [5] y1: sampled hidden units at t1
+        '''
+        ax, px, sx = self.xoy(y0)
+        ay, py, y1 = self.yox(sx)
+        return [ax, px, sx, ay, py, y1]
 
-    def gibbs_vhv(self, v0_sample):
-        ''' This function implements one step of Gibbs sampling,
-            starting from the visible state'''
-        pre_sigmoid_h1, h1_mean, h1_sample = self.sample_h_given_v(v0_sample)
-        pre_sigmoid_v1, v1_mean, v1_sample = self.sample_v_given_h(h1_sample)
-        return [
-            pre_sigmoid_h1, h1_mean, h1_sample, pre_sigmoid_v1, v1_mean,
-            v1_sample
-        ]
+    def xyx(self, x0):
+        ''' build symbolic expression of one step of Gibbs sampling,
+        from the visible state x0, to the intermediate hidden state
+        y?, then to the next visible state x1.
+        x0: hidden units at t0
+        returns:
+        [0] ay: raw activation of hidden units due to x0
+        [1] py: mean activation of hidden units
+        [2] sy: sampled visible units
+        [3] ax: raw activation of visible units at t1
+        [4] px: mean activation of visible units at t1
+        [5] x1: sampled visible states at t1
+        '''
+        ay, py, sy = self.xoy(x0)
+        ax, px, x1 = self.yox(sy)
+        return [ay, py, sy, ax, px, x1]
 
-    # start-snippet-2
-    def get_cost_updates(self, lr=0.1, persistent=None, k=1):
+    def get_cost_updates(self, x, lr=0.1, persistent=None, k=1):
         """This functions implements one step of CD-k or PCD-k
+        lr: learning rate used to train the RBM
+        persistent: None for CD. For PCD, shared variable containing old state
+        of Gibbs chain. This must be a shared variable of size (batch size,
+        number of hidden units).
+        x: input to be wired to the visible units
+        k: number of Gibbs steps to do in CD-k/PCD-k
 
-        :param lr: learning rate used to train the RBM
-
-        :param persistent: None for CD. For PCD, shared variable
-            containing old state of Gibbs chain. This must be a shared
-            variable of size (batch size, number of hidden units).
-
-        :param k: number of Gibbs steps to do in CD-k/PCD-k
-
-        Returns a proxy for the cost and the updates dictionary. The
-        dictionary contains the update rules for weights and biases but
-        also an update of the shared variable used to store the persistent
-        chain, if one is used.
-
+        Returns a proxy for the cost and the updates dictionary. The dictionary
+        contains the update rules for weights and biases but also an update of
+        the shared variable used to store the persistent chain, if one is used.
         """
 
-        # compute positive phase
-        pre_sigmoid_ph, ph_mean, ph_sample = self.sample_h_given_v(self.input)
+        # compute positive phase? seriousely?
 
         # decide how to initialize persistent chain:
         # for CD, we use the newly generate hidden sample
         # for PCD, we initialize from the old state of the chain
-        if persistent is None:
-            chain_start = ph_sample
+        if persistent:
+            y_0 = persistent
         else:
-            chain_start = persistent
-        # end-snippet-2
+            ay0, py0, y_0 = self.yox(x)
+
         # perform actual negative phase
         # in order to implement CD-k/PCD-k we need to scan over the
         # function that implements one gibbs step k times.
         # Read Theano tutorial on scan for more information :
         # http://deeplearning.net/software/theano/library/scan.html
         # the scan will return the entire Gibbs chain
-        ([
-            pre_sigmoid_nvs, nv_means, nv_samples, pre_sigmoid_nhs, nh_means,
-            nh_samples
-        ], updates) = theano.scan(
-            self.gibbs_hvh,
+        import theano
+        ([ax, px, sx, ay, py, sy], updates) = theano.scan(
+            self.yxy,
             # the None are place holders, saying that
-            # chain_start is the initial state corresponding to the
+            # MCy0 is the initial state corresponding to the
             # 6th output
-            outputs_info=[None, None, None, None, None, chain_start],
+            outputs_info=[None, None, None, None, None, y_0],
             n_steps=k)
-        # start-snippet-3
+
         # determine gradients on RBM parameters
         # note that we only need the sample at the end of the chain
-        chain_end = nv_samples[-1]
+        # sample x from p(x) = F(x)/Z, where Z=sum(F(_x_))
+        x_k = sx[-1]
 
-        cost = T.mean(self.free_energy(self.input)) - T.mean(
-            self.free_energy(chain_end))
-        # We must not compute the gradient through the gibbs sampling
-        gparams = T.grad(cost, self.params, consider_constant=[chain_end])
-        # end-snippet-3 start-snippet-4
+        # positive phase and negative phase
+        pp = self.__free_energy__(x)
+        np = self.__free_energy__(x_k)
+
+        # psudo cost = -log[p(x)]
+        cost = T.mean(pp) - T.mean(np)
+        # compute the gradient of cost w.r.t. the parameters, [w, b, c], but
+        # skip the parameters' involvement in the gibbs chain, because the
+        # sampling only serves to approximate the normalizing constant Z.
+        parm = [self.w, self.b, self.c]
+        grad = T.grad(cost, parm, consider_constant=[x_k])
+
         # constructs the update dictionary
-        for gparam, param in zip(gparams, self.params):
+        for g, p in zip(grad, parm):
             # make sure that the learning rate is of the right dtype
-            updates[param] = param - gparam * T.cast(
-                lr, dtype=theano.config.floatX)
+            updates[p] = p - g * T.cast(lr, 'float32')
         if persistent:
             # Note that this works only if persistent is a shared variable
-            updates[persistent] = nh_samples[-1]
+            updates[persistent] = sy[-1]
             # pseudo-likelihood is a better proxy for PCD
             monitoring_cost = self.get_pseudo_likelihood_cost(updates)
         else:
             # reconstruction cross-entropy is a better proxy for CD
-            monitoring_cost = self.get_reconstruction_cost(updates,
-                                                           pre_sigmoid_nvs[-1])
+            monitoring_cost = self.get_reconstruction_cost(updates, ax[-1])
 
         return monitoring_cost, updates
         # end-snippet-4
-
-    def get_pseudo_likelihood_cost(self, updates):
-        """Stochastic approximation to the pseudo-likelihood"""
-
-        # index of bit i in expression p(x_i | x_{\i})
-        bit_i_idx = theano.shared(value=0, name='bit_i_idx')
-
-        # binarize the input image by rounding to nearest integer
-        xi = T.round(self.input)
-
-        # calculate free energy for the given bit configuration
-        fe_xi = self.free_energy(xi)
-
-        # flip bit x_i of matrix xi and preserve all other bits x_{\i}
-        # Equivalent to xi[:,bit_i_idx] = 1-xi[:, bit_i_idx], but assigns
-        # the result to xi_flip, instead of working in place on xi.
-        xi_flip = T.set_subtensor(xi[:, bit_i_idx], 1 - xi[:, bit_i_idx])
-
-        # calculate free energy with bit flipped
-        fe_xi_flip = self.free_energy(xi_flip)
-
-        # equivalent to e^(-FE(x_i)) / (e^(-FE(x_i)) + e^(-FE(x_{\i})))
-        cost = T.mean(self.n_visible *
-                      T.log(T.nnet.sigmoid(fe_xi_flip - fe_xi)))
-
-        # increment bit_i_idx % number as part of updates
-        updates[bit_i_idx] = (bit_i_idx + 1) % self.n_visible
-
-        return cost
-
-    def get_reconstruction_cost(self, updates, pre_sigmoid_nv):
-        """Approximation to the reconstruction error
-
-        Note that this function requires the pre-sigmoid activation as
-        input.  To understand why this is so you need to understand a
-        bit about how Theano works. Whenever you compile a Theano
-        function, the computational graph that you pass as input gets
-        optimized for speed and stability.  This is done by changing
-        several parts of the subgraphs with others.  One such
-        optimization expresses terms of the form log(sigmoid(x)) in
-        terms of softplus.  We need this optimization for the
-        cross-entropy since sigmoid of numbers larger than 30. (or
-        even less then that) turn to 1. and numbers smaller than
-        -30. turn to 0 which in terms will force theano to compute
-        log(0) and therefore we will get either -inf or NaN as
-        cost. If the value is expressed in terms of softplus we do not
-        get this undesirable behaviour. This optimization usually
-        works fine, but here we have a special case. The sigmoid is
-        applied inside the scan op, while the log is
-        outside. Therefore Theano will only see log(scan(..)) instead
-        of log(sigmoid(..)) and will not apply the wanted
-        optimization. We can not go and replace the sigmoid in scan
-        with something else also, because this only needs to be done
-        on the last step. Therefore the easiest and more efficient way
-        is to get also the pre-sigmoid activation as an output of
-        scan, and apply both the log and sigmoid outside scan such
-        that Theano can catch and optimize the expression.
-
-        """
-
-        cross_entropy = T.mean(
-            T.sum(self.input * T.log(T.nnet.sigmoid(pre_sigmoid_nv)) + (
-                1 - self.input) * T.log(1 - T.nnet.sigmoid(pre_sigmoid_nv)),
-                  axis=1))
-
-        return cross_entropy
-
-
-def test_rbm(learning_rate=0.1,
-             training_epochs=15,
-             dataset='mnist.pkl.gz',
-             batch_size=20,
-             n_chains=20,
-             n_samples=10,
-             output_folder='rbm_plots',
-             n_hidden=500):
-    """
-    Demonstrate how to train and afterwards sample from it using Theano.
-
-    This is demonstrated on MNIST.
-
-    :param learning_rate: learning rate used for training the RBM
-
-    :param training_epochs: number of epochs used for training
-
-    :param dataset: path the the pickled dataset
-
-    :param batch_size: size of a batch used to train the RBM
-
-    :param n_chains: number of parallel Gibbs chains to be used for sampling
-
-    :param n_samples: number of samples to plot for each chain
-
-    """
-    datasets = load_data(dataset)
-
-    train_set_x, train_set_y = datasets[0]
-    test_set_x, test_set_y = datasets[2]
-
-    # compute number of minibatches for training, validation and testing
-    n_train_batches = train_set_x.get_value(borrow=True).shape[0] / batch_size
-
-    # allocate symbolic variables for the data
-    index = T.lscalar()  # index to a [mini]batch
-    x = T.matrix('x')  # the data is presented as rasterized images
-
-    rng = numpy.random.RandomState(123)
-    theano_rng = RandomStreams(rng.randint(2**30))
-
-    # initialize storage for the persistent chain (state = hidden
-    # layer of chain)
-    persistent_chain = theano.shared(
-        numpy.zeros(
-            (batch_size, n_hidden), dtype=theano.config.floatX),
-        borrow=True)
-
-    # construct the RBM class
-    rbm = RBM(input=x,
-              n_visible=28 * 28,
-              n_hidden=n_hidden,
-              numpy_rng=rng,
-              theano_rng=theano_rng)
-
-    # get the cost and the gradient corresponding to one step of CD-15
-    cost, updates = rbm.get_cost_updates(
-        lr=learning_rate, persistent=persistent_chain, k=15)
-
-    #################################
-    #     Training the RBM          #
-    #################################
-    if not os.path.isdir(output_folder):
-        os.makedirs(output_folder)
-    os.chdir(output_folder)
-
-    # start-snippet-5
-    # it is ok for a theano function to have no output
-    # the purpose of train_rbm is solely to update the RBM parameters
-    train_rbm = theano.function(
-        [index],
-        cost,
-        updates=updates,
-        givens={x: train_set_x[index * batch_size:(index + 1) * batch_size]},
-        name='train_rbm')
-
-    plotting_time = 0.
-    start_time = timeit.default_timer()
-
-    # go through training epochs
-    for epoch in range(training_epochs):
-
-        # go through the training set
-        mean_cost = []
-        for batch_index in range(n_train_batches):
-            mean_cost += [train_rbm(batch_index)]
-
-        print('Training epoch %d, cost is ' % epoch, numpy.mean(mean_cost))
-
-        # Plot filters after each training epoch
-        plotting_start = timeit.default_timer()
-        # Construct image from the weight matrix
-        image = Image.fromarray(
-            tile_raster_images(
-                X=rbm.W.get_value(borrow=True).T,
-                img_shape=(28, 28),
-                tile_shape=(10, 10),
-                tile_spacing=(1, 1)))
-        image.save('filters_at_epoch_%i.png' % epoch)
-        plotting_stop = timeit.default_timer()
-        plotting_time += (plotting_stop - plotting_start)
-
-    end_time = timeit.default_timer()
-
-    pretraining_time = (end_time - start_time) - plotting_time
-
-    print('Training took %f minutes' % (pretraining_time / 60.))
-    # end-snippet-5 start-snippet-6
-    #################################
-    #     Sampling from the RBM     #
-    #################################
-    # find out the number of test samples
-    number_of_test_samples = test_set_x.get_value(borrow=True).shape[0]
-
-    # pick random test examples, with which to initialize the persistent chain
-    test_idx = rng.randint(number_of_test_samples - n_chains)
-    persistent_vis_chain = theano.shared(
-        numpy.asarray(
-            test_set_x.get_value(borrow=True)[test_idx:test_idx + n_chains],
-            dtype=theano.config.floatX))
-    # end-snippet-6 start-snippet-7
-    plot_every = 1000
-    # define one step of Gibbs sampling (mf = mean-field) define a
-    # function that does `plot_every` steps before returning the
-    # sample for plotting
-    ([presig_hids, hid_mfs, hid_samples, presig_vis, vis_mfs, vis_samples],
-     updates) = theano.scan(
-         rbm.gibbs_vhv,
-         outputs_info=[None, None, None, None, None, persistent_vis_chain],
-         n_steps=plot_every)
-
-    # add to updates the shared variable that takes care of our persistent
-    # chain :.
-    updates.update({persistent_vis_chain: vis_samples[-1]})
-    # construct the function that implements our persistent chain.
-    # we generate the "mean field" activations for plotting and the actual
-    # samples for reinitializing the state of our persistent chain
-    sample_fn = theano.function(
-        [], [vis_mfs[-1], vis_samples[-1]], updates=updates, name='sample_fn')
-
-    # create a space to store the image for plotting ( we need to leave
-    # room for the tile_spacing as well)
-    image_data = numpy.zeros(
-        (29 * n_samples + 1, 29 * n_chains - 1), dtype='uint8')
-    for idx in range(n_samples):
-        # generate `plot_every` intermediate samples that we discard,
-        # because successive samples in the chain are too correlated
-        vis_mf, vis_sample = sample_fn()
-        print(' ... plotting sample ', idx)
-        image_data[29 * idx:29 * idx + 28, :] = tile_raster_images(
-            X=vis_mf,
-            img_shape=(28, 28),
-            tile_shape=(1, n_chains),
-            tile_spacing=(1, 1))
-
-    # construct image
-    image = Image.fromarray(image_data)
-    image.save('samples.png')
-    # end-snippet-7
-    os.chdir('../')
-
-
-if __name__ == '__main__':
-    test_rbm()

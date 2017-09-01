@@ -5,37 +5,26 @@ class Cat(Nnt):
     """
     Neural networks formed by concatinating sub-networks.
     """
-    def __init__(self, nts=[]):
+    def __init__(self, nts):
         """
         Initialize the super neural network by a list of sub networks.
 
         -------- parameters --------
         nts: child networks to be chinned up.
         """
-        super(Cat, self).__init__()
-        self.extend(nts)
+        # compose chained shape, also perform sanity checking
+        dim = [nts[0].dim[0]]
+        for u, v in zip(nts[:-1], nts[+1:]):
+            if u.dim[-1] == v.dim[0]:
+                dim.append(v.dim[0])
+                continue
+            raise Exception('shape not chainable', u.dim, v.dim)
 
-    # def extend(self, nts):
-    #     """ concatinate a list of networks. """
-    #     if not nts:
-    #         return None
-    #     if len(self) and self.dim[-1] != nts[0].dim[0]:
-    #         raise Exception('dimension mismatch:', self, nts[0])
-    #     dim = self.dim[:-1]
-    #     for p, q in zip(nts[:-1], nts[1:]):
-    #         if p.dim[-1] != q.dim[0]:
-    #             raise Exception('dimension mismatch:', p, q)
-    #         dim.append(q.dim[0])
-    #     dim.append(nts[-1].dim[-1])
-    #     self.dim = dim
-    #     super(Cat, self).extend(nts)
+        # call super initializer
+        super(Cat, self).__init__(dim)
 
-    # def append(self, nnt):
-    #     """ concatinate one network. """
-    #     if len(self) and self.dim[-1] != nnt.dim[0]:
-    #         raise Exception('dimension mismatch:', self, nnt)
-    #     self.dim.append(nnt.dim[-1])
-    #     super(Cat, self).append(nnt)
+        # save the chain
+        super(Cat, self).extend(nts)
 
     def __expr__(self, x):
         """

@@ -1,47 +1,40 @@
 from xnnt.ae import AE
 from xnnt.cat import Cat
+from xnnt.mlp import MLP
 
 
 class SAE(Cat):
     """
     Stacked Auto Encoder
     """
-    def __init__(self, AEs=None, **kwd):
+    def __init__(self, fr, **kwd):
         """
         Initialize the stacked auto encoder by a list of code dimensions.
-        The weight and bias terms in the AEs are initialized by default rule.
-        -------- optional parameters --------
-        -- AEs: a list of autoencoders.
-        ** dim: a list of dimensions to create autoencoders.
-        """
-        super(SAE, self).__init__()
-        self.sa = []
-        self.ec = Cat()
-        self.dc = Cat()
-        self.stack(AEs, **kwd)
+        The weight and bias terms are initialized by default rule.
 
-    def stack(self, AEs=[], **kwd):
-        """ stack a list of AEs on top of the current SAE.
-        AEs: autoencoders to be stacked, can be an SAE form, or a list of
-        dimensions to build an SAE, otherwise no action will be taken.
+        -- fr: the series input to build SAE from. can be a series of int
+        or AEs.
         """
-        # list of AE from an SAE, or dimension numbers.
-        if AEs and all([isinstance(a, int) for a in AEs]):
-            sa = [AE(d, **kwd) for d in zip(AEs[:-1], AEs[1:])]
-        elif isinstance(AEs, SAE):
-            sa = AEs.sa
+        # by a list of integers
+        if all(isinstance(_, int) for _ in fr):
+            fr = list(fr)
+            sa = [AE(_, **kwd) for _ in zip(fr[:-1], fr[1:])]
+        # by a list of AEs
+        elif all(isinstance(_, AE) for _ in fr):
+            fr = list(fr)
+            sa = fr
+        # by a MLP
+        elif isinstance(fr, MLP):
+            sa = [AE(_, **kwd) for _ in fr]
         else:
-            sa = AEs
-
-        # list of encoders and decoders to be stacked
+            raise ValueError('SAE: fr must be int[2+], AE[2+] or MLP')
         ec = [a.ec for a in sa]
         dc = [a.dc for a in reversed(sa)]
+        super(SAE, self).__init__(ec + dc)
 
-        # stack them now.
-        self.sa.extend(sa)
-        self.ec.extend(ec)
-        self.dc[:0] = dc
-        self[:] = self.ec + self.dc
+        self.sa = sa            # default view
+        self.ec = MLP(ec)       # encoder view
+        self.dc = MLP(dc)       # decoder view
 
     def sub(self, start=None, stop=None, copy=False):
         """ get sub stack from of lower encoding stop

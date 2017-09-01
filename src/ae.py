@@ -7,7 +7,7 @@ class AE(Cat):
     Autoencoder
     """
 
-    def __init__(self, dim, **kw):
+    def __init__(self, fr, **kw):
         """
         Initialize the denosing auto encoder by specifying the the dimension
         of the input  and output.
@@ -15,20 +15,24 @@ class AE(Cat):
         bias.
 
         -------- parameters --------
-        dim:
-        dim[0] dimension of the input (visible units)
-        dim[1] dimension of the code (hidden units)
+        -- fr: from what to build AE. can a pair of int or a Pcp.
         """
-        """ the encoder view of the autoencoder """
-        ec = Pcp(dim, **kw)
-        kw.pop('w', None)
+        # the encoder view
+        from numpy import number
+        if isinstance(fr, Pcp):
+            ec = fr
+        elif any(isinstance(fr, _) for _ in [tuple, list]) and all(
+                isinstance(_, int) for _ in fr):
+            ec = Pcp(fr, **kw)
+        elif isinstance(fr, number):
+            ec = Pcp(fr.astype('<i4').tolist(), **kw)
+        else:
+            raise ValueError('AE: fr must be int[2] or a Pcp')
 
-        """ the decoder view of the autoencoder """
-        dc = Pcp([dim[1], dim[0]], ec.w.T, **kw)
-        kw.pop('b', None)
-        kw.pop('s', None)
+        # the decoder view, the weights are tied
+        dc = Pcp([ec.dim[1], ec.dim[0]], ec.w.T, **kw)
 
-        # the default view is a concatinated network of dimension d0, d1, d0
+        # the default view is a concatinated network
         super(AE, self).__init__([ec, dc])
         self.ec = ec
         self.dc = dc

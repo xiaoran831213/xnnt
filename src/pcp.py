@@ -3,7 +3,6 @@ from xnnt.hlp import S, C
 from xnnt.nnt import Nnt
 from xnnt import exb
 from theano import tensor as T
-from theano import scan as sc
 
 
 class Pcp(Nnt):
@@ -11,6 +10,7 @@ class Pcp(Nnt):
     A Perceptron, which is a full linear combination of the input entries
     and an intercept, followed by an per-entry transform (e.g. sigmoid).
     """
+
     def __init__(self, dim, w=None, b=None, c=None, s=None, **kwd):
         """
         Initialize the perceptron by specifying the the dimension of input
@@ -21,9 +21,9 @@ class Pcp(Nnt):
         the weights are shared between the layers
 
         -------- parameters --------
-        dim: a 2-tuple of input/output dimensions
-        d_1: specify the input dimension P, or # of visible units
-        d_2: specify the output dimension Q, or # of hidden units
+        -- dim: shape of the perceptron
+        --  d[ 0]: specify the  input dimension P, or # of visible units
+        --  d[-1]: specify the output dimension Q, or # of hidden units
 
         w: (optional) weight of dimension (P, Q), randomly initialized
         if not given.
@@ -38,10 +38,7 @@ class Pcp(Nnt):
         default the sigmoid is used.
         To suppress nonlinearity, specify 1 instead.
         """
-        super(Pcp, self).__init__(**kwd)
-
-        # I/O dimensions
-        self.dim = dim
+        super(Pcp, self).__init__(dim, **kwd)
 
         # note : W' was written as `W_prime` and b' as `b_prime`
         """
@@ -65,14 +62,18 @@ class Pcp(Nnt):
         if w is None:
             if s in ['softplus', 'relu', 'sftp']:
                 print('Initalize w for', s)
-                w = self.__nrng__.normal(
-                    0, np.sqrt(1.0/dim[0] + 1.0/dim[1]), dim)
+                w = self.__nrng__.normal(0,
+                                         np.sqrt(1.0 / dim[0] + 1.0 / dim[1]),
+                                         dim)
             elif s in ['sigmoid', 'elliot', 'logistic']:
                 print('Initalize w for', s)
-                w = self.__nrng__.uniform(
-                    low=-4 * np.sqrt(6. / (dim[0] + dim[1])),
-                    high=4 * np.sqrt(6. / (dim[0] + dim[1])),
-                    size=dim)
+                w = self.__nrng__.normal(0,
+                                         np.sqrt(1.0 / dim[0] + 1.0 / dim[1]),
+                                         dim)
+                # w = self.__nrng__.uniform(
+                #     low=-4 * np.sqrt(6. / (dim[0] + dim[1])),
+                #     high=4 * np.sqrt(6. / (dim[0] + dim[1])),
+                #     size=dim)
             elif s == 'softmax':
                 print('Initialize w for softmax', cat)
                 w = self.__nrng__.uniform(
@@ -81,8 +82,9 @@ class Pcp(Nnt):
                     size=(cat, dim[0], dim[1]))
             else:
                 print('Initialize w for affine')
-                w = self.__nrng__.normal(
-                    0, np.sqrt(1.0/dim[0] + 1.0/dim[1]), dim)
+                w = self.__nrng__.normal(0,
+                                         np.sqrt(1.0 / dim[0] + 1.0 / dim[1]),
+                                         dim)
             w = S(w, 'w')
 
         if b is None:
@@ -105,29 +107,35 @@ class Pcp(Nnt):
         self.gamma = None
 
         # flexible shape of the activation function.
-        for shp in ('alpha', 'beta', 'gamma'):
-            v = kwd.get(shp, None)
+        for dim in ('alpha', 'beta', 'gamma'):
+            v = kwd.get(dim, None)
             if v is None:
                 continue
-            vars(self)[shp] = S(v, shp, 'f4')
+            vars(self)[dim] = S(v, dim, 'f4')
 
         # constant shape parameters
-        for shp in ('Alpha', 'Beta', 'Gamma'):
-            v = kwd.get(shp, None)
+        for dim in ('Alpha', 'Beta', 'Gamma'):
+            v = kwd.get(dim, None)
             if v is None:
                 continue
-            shp = shp.lower()
-            vars(self)[shp] = C(v, shp, 'f4')
+            dim = dim.lower()
+            vars(self)[dim] = C(v, dim, 'f4')
 
-        self.w = w            # weight matrix
-        self.b = b            # offset on output (bias of the hidden)
-        self.c = c            # offset on bottom (bias of the visible)
-        self.lvl = lvl        # output level
-        self.cat = cat        # output categorys
+        self.w = w  # weight matrix
+        self.b = b  # offset on output (bias of the hidden)
+        self.c = c  # offset on bottom (bias of the visible)
+        self.lvl = lvl  # output level
+        self.cat = cat  # output categorys
 
     # a perceptron is represented by the nonlinear funciton and dimensions
     def __repr__(self):
-        L = {'softmax': 'M', 'sigmoid': 'S', 'relu': 'R', 'softplus': 'P'}
+        L = {
+            'softmax': 'M',
+            'sigmoid': 'S',
+            'relu': 'R',
+            'softplus': 'P',
+            1: 'I'
+        }
         return '{}({}x{})'.format(L.get(self.s, ""), self.dim[0], self.dim[1])
 
     def __expr__(self, x):
@@ -152,7 +160,7 @@ class Pcp(Nnt):
             # cross bars to dertermine which level the output is located
             if self.lvl > 2:
                 from scipy.stats import norm
-                bar = norm.ppf(np.linspace(0, 1, self.lvl+1))[1:self.lvl]
+                bar = norm.ppf(np.linspace(0, 1, self.lvl + 1))[1:self.lvl]
                 bar = bar.reshape(self.lvl - 1, 1, 1).astype('f')
                 _ = _ - C(bar, 'Bar')
                 self.bar = bar
@@ -186,7 +194,7 @@ class Pcp(Nnt):
         if self.s == 'relu':
             _ = exb.relu(_, self.alpha)
             _.name = 'relu(Xw+b)'
-            
+
         return _
 
     def __free_energy__(self, x, family='b'):
@@ -281,8 +289,7 @@ class Pcp(Nnt):
         # Note that theano_rng.binomial returns a symbolic sample of dtype
         # int64 by default. If we want to keep our computations in floatX
         # for the GPU we need to specify to return the dtype floatX
-        sy = self.__trng__.binomial(
-            size=py.shape, n=1, p=py, dtype='float32')
+        sy = self.__trng__.binomial(size=py.shape, n=1, p=py, dtype='float32')
         return [ay, py, sy]
 
     def propdown(self, y0):
@@ -318,8 +325,7 @@ class Pcp(Nnt):
         # Note that theano_rng.binomial returns a symbolic sample of dtype
         # int64 by default. If we want to keep our computations in floatX
         # for the GPU we need to specify to return the dtype floatX
-        x1 = self.__trng__.binomial(
-            size=px.shape, n=1, p=px, dtype='float32')
+        x1 = self.__trng__.binomial(size=px.shape, n=1, p=px, dtype='float32')
         return [ax, px, x1]
 
     def yxy(self, y0):

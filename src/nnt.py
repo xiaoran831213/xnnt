@@ -1,4 +1,3 @@
-import numpy as np
 import theano
 from theano import tensor as T
 from theano import shared as S
@@ -9,18 +8,20 @@ class Nnt(list):
     Generic layer of neural network
     """
 
-    def __init__(self, seed=None, **kwd):
+    def __init__(self, dim, **kw):
         """
-        -- seed: seed for random number generator.
+        -- dim: network shape
 
+        ** seed: seed for random number generator.
         ** tag: a short representation of the network.
         """
+        import numpy as np
         # numpy random number generator
-        seed = kwd.pop('seed', None)
-        nrng = kwd.pop('nrng', np.random.RandomState(seed))
+        seed = kw.pop('seed', None)
+        nrng = kw.pop('nrng', np.random.RandomState(seed))
 
         from theano.tensor.shared_randomstreams import RandomStreams
-        trng = kwd.pop('trng', RandomStreams(nrng.randint(0x7FFFFFFF)))
+        trng = kw.pop('trng', RandomStreams(nrng.randint(0x7FFFFFFF)))
 
         # private members
         self.__seed__ = seed
@@ -28,22 +29,25 @@ class Nnt(list):
         self.__trng__ = trng
 
         # rest of the keywords become public members.
-        self.__dict__.update(kwd)
+        self.__dict__.update(kw)
 
-    def __call__(self, x, **kwd):
+        # by convention, record input - output dimensions
+        self.dim = dim
+
+    def __call__(self, x, **kw):
         """
         makes the network a callable object.
         """
-        return self.__expr__(x, **kwd)
+        return self.__expr__(x, **kw)
 
-    def __expr__(self, x, **kwd):
+    def __expr__(self, x, **kw):
         """
         build symbolic expression of output given input. x is supposdly
         a tensor object.
         """
         return x
 
-    def __pcpy__(self, nnt, **kwd):
+    def __pcpy__(self, nnt, **kw):
         """
         shallowly paste parameter values onto another network of exact
         topology.
@@ -51,7 +55,7 @@ class Nnt(list):
         nnt: the target network to print parameter values. if None, a new
         network is created.
 
-        kwd: dictionary of additional keywords.
+        kw: dictionary of additional keywords.
 
         return:
         the target neural network with parameter pasted.
@@ -78,7 +82,7 @@ class Nnt(list):
         # done
         return nnt
 
-    def __parm__(self, **kwd):
+    def __parm__(self, **kw):
         """ Sallowly list parameters to be tuned by a trainer, they must
         be shared tensors, and should be on the symbolic expression.
         By default, all shared tensor members are returned.
@@ -92,7 +96,7 @@ class Nnt(list):
         return dict(
             (k, v) for k, v in vars(self).items() if isinstance(v, t))
 
-    def __wreg__(self, **kwd):
+    def __wreg__(self, **kw):
         """ sallowly list weight parameters. weights will later be subjected
         to regulator terms for model decay. (e.g. LASSO and Regee regression.)
         By default, the shared tensor member named 'w' will be selected.
@@ -119,6 +123,7 @@ class Nnt(list):
 
 def tst1():
     from pcp import Pcp
+    import numpy as np
     p1 = Pcp([100, 200])
     p2 = Pcp([100, 200])
     # print(np.all(p1.w.get_value() == p2.w.get_value()))

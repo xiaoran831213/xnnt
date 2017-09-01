@@ -108,32 +108,43 @@ def cov(x, y=None):
     return T.squeeze(r)
 
 
-def mcr(x, y):
+def mcr(x, y, grand=True):
     """ build expression of mean correlation with respect to all features.
-    The first dimension of {x} and {y} are treated assample index, the rest
+    The first dimension of {x} and {y} are treated as sample index, the rest
     span the feature space.
-    Mean correlation of all features usually measures prediction performance
-    for real continuous target variables.
+    Correlation between truth {x} and prediction {y} usually measures
+    prediction performance for real continuous target label.
+    
+    must make usre x and y has the same dimensions.
     """
     # make sure x is a matrix, and also *symbolic*
     if x.ndim < 2:
         x = T.reshape(x, [x.size, 1])
-    else:
-        x = T.reshape(x, [x.shape[0], -1])
+    if isinstance(x, np.ndarray):
+        x = T.TensorVariable(x, x.shape)
 
     # make sure y is a matrix, and also *symbolic*
     if y.ndim < 2:
         y = T.reshape(y, [y.size, 1])
-    else:
-        y = T.reshape(y, [y.shape[0], -1])
+    if isinstance(y, np.ndarray):
+        y = T.TensorVariable(y, y.shape)
 
     # z-scores of every feature for both x and y
     zx = (x - T.mean(x, 0, keepdims=True))/T.std(x, 0, keepdims=True)
     zy = (y - T.mean(y, 0, keepdims=True))/T.std(y, 0, keepdims=True)
 
-    # row mean of z-score product are (P) correlations, further, the column
-    # mean of P correlations give the mean correlation.
-    rr = (zx * zy).mean()
+    # row mean of z-score product are (d[2], ..., d[P]) correlations for each
+    # feature;
+    rr = (zx * zy).mean(0)      # per-feature correlation.
+    if not grand:
+        return rr
+
+    # further down, the column mean of correlations of all features is the
+    # grand mean correlation.
+    # some feature may have produced NA correlation betwen x and x due to zero
+    # standard deviation (na in data, or non-varying feature)
+    if grand:
+        rr = rr[T.nonzero(~T.isnan(rr))].mean()
     return rr
 
 
@@ -228,6 +239,9 @@ class Softmax:
         e = T.exp(x - x.max(1, keepdims=True))
         return e / e.sum(1, keepdims=True)
 
+    def __str__(self):
+        return 'softmax'
+
 
 logistic = Logistic()
 relu = Relu()
@@ -235,6 +249,9 @@ elliot = Elliot()
 softmax = Softmax()
 sigmoid = T.nnet.sigmoid
 softplus = T.nnet.softplus
+sin = T.sin
+cos = T.cos
+
 
 # squashers to initials
 S2I = {'relu': 'RL', 'softmax': 'SM', 'sigmoid': 'SG', 'softplus': 'SP'}

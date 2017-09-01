@@ -23,11 +23,11 @@ class Jnt(Nnt):
         index the samples.
         The default operation is simply concatenate the outputs
         """
-        super(Jnt, self).__init__()
 
         # input dimension is the list of child input dimenions,
         # output dimension is the sum of child output dimensions.
         dim = [[n.dim[0] for n in nts], sum([n.dim[-1] for n in nts])]
+        super(Jnt, self).__init__(dim)
 
         self.extend(nts)
         self.dim = dim

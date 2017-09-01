@@ -6,21 +6,20 @@ class MLP(Cat):
     """
     Multiple Layered Perceptron
     """
-    def __init__(self, pts):
+    def __init__(self, fr, **kw):
         """
         Initialize the stacked auto encoder by a list of code dimensions.
         The weight and bias terms in the AEs are initialized by default rule.
         -------- parameters --------
-        pts: a list of (single layered) perceptrons
+        fr: from what to build the MLP, can be a series of Pcp or integers.
         """
-        super(MLP, self).__init__(pts)
-
-    @staticmethod
-    def from_dim(dim, **kwd):
-        """ create SAE by specifying encoding dimensions
-        dim: a list of encoding dimensions
-        """
-        return MLP([Pcp(d, **kwd) for d in zip(dim[:-1], dim[1:])])
+        if all(isinstance(_, int) for _ in fr):
+            nts = [Pcp(_, **kw) for _ in zip(fr[:-1], fr[1:])]
+        elif all(isinstance(_, Pcp) for _ in fr):
+            nts = fr
+        else:
+            raise ValueError("MLP: fr must be int[2+] or Pcp[1+]")
+        super(MLP, self).__init__(nts)
 
     def sub(self, start=None, stop=None, copy=False):
         """ get sub stack from of lower encoding stop
@@ -40,16 +39,16 @@ class MLP(Cat):
         return ret
 
     @staticmethod
-    def Train(w, x, y, nep=20, gdy=0, **kwd):
-        """ train the stacked autoencoder {w}.
-        w: the MLP
+    def Train(nwk, x, y, u=None, v=None, nep=20, gdy=0, **kw):
+        """ train the MLP
+        nwk: the MLP
         x: the training features.
         y: the training lables.
 
         nep: number of epochs to go through, if not converge.
-        gdy: number of greedy pre-training to go through per added layer.
+        gdy: number of greedy pre-training to go through per layer.
 
-        kwd - additional key words to pass on to the trainer.
+        kw - additional key words to pass on to the trainer.
         ** lrt: initial learning rate.
         ** hte: halting error
         **   u: the testing features.
@@ -58,19 +57,41 @@ class MLP(Cat):
         returns: the used trainer {class: xnnt.tnr.bas}.
         """
         # the trainer class
-        from xnnt.tnr.bas import Base as Tnr
+        from xnnt.tnr.cmb import Comb as Tnr
 
         # layer-wise greedy pre-training (incremental).
         if gdy > 0:
-            for i in range(1, len(w)):
-                sw = w.sub(0, i)
-                print('pre-train sub-MLP:', sw)
-                tr = Tnr(sw, x, y, **kwd)
-                tr.tune(gdy)
+            print('MLP: pre-train:', nwk)
+            from xnnt.sae import SAE
+            pkw = kw.copy()
+            pkw['err'] = 'CE'
+            pkw.pop('u', None)
+            pkw.pop('v', None)
+            xi = x
+            i = 1
+            while True:
+                sae = SAE(nwk.sub(0, i))
+                top = sae.sub(-1)
+                pkw['lrt'] = min(
+                    kw.get('lrt', 1e-3) * (len(nwk) - i + 1), 1e-1)
 
+                print('MLP: pre-train sub-SAE top:', top)
+                tnr = Tnr(top, xi, xi, **pkw)
+                tnr.tune(gdy)
+
+                if i == len(nwk):
+                    break
+
+                print('MLP: pre-train sub-SAE all:', sae)
+                tnr = Tnr(sae, x, x, **pkw)
+                tnr.tune(gdy)
+
+                i = i + 1
+                xi = sae.ec(x).eval()
+                
         # whole network fine-tuning
-        print('train stack:', w)
-        tr = Tnr(w, x, y, **kwd)
+        print('train stack:', nwk)
+        tr = Tnr(nwk, x, y, u, v, **kw)
         tr.tune(nep)
 
         return tr
