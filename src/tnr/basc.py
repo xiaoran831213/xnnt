@@ -152,6 +152,7 @@ class Base(object):
         gabs = T.abs_(gvec)
         gsup = T.max(gabs)
 
+        self.tnx = kwd.get('tnx', 0.0)
         xgrad = T.grad(cost, x)
         xgabs = T.abs_(xgrad)
         xgsup = T.max(xgabs)
@@ -394,9 +395,10 @@ class Base(object):
             self.hlt = 2
             return True
         # early stop if we run out of patient on rising verr
-        if r['ep'] - self.__emin_verr__['ep'] > self.hvp:
-            self.hlt = 3
-            return True
+        if (self.xv and self.yv) is not None:
+            if r['ep'] - self.__emin_verr__['ep'] > self.hvp:
+                self.hlt = 3
+                return True
         if r['lr'] < self.hlr:  # fail
             self.hlt = 9
             return True
@@ -424,8 +426,10 @@ class Base(object):
             # send one batch for training
             t0 = tm()
             # update x
-            self.xt.set_value(
-                 self.xt.get_value() - self.xgrd())
+            if self.tnx != 0.0:
+                x = self.xt.get_value()
+                x = x - self.xgrd() * self.tnx
+                self.xt.set_value(x)
 
             self.step()
             # self.__onbt__()  # on each batch
