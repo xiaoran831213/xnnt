@@ -121,13 +121,13 @@ def mcr(x, y, grand=True):
     if x.ndim < 2:
         x = T.reshape(x, [x.size, 1])
     if isinstance(x, np.ndarray):
-        x = T.TensorVariable(x, x.shape)
+        x = T.as_tensor_variable(x)
 
     # make sure y is a matrix, and also *symbolic*
     if y.ndim < 2:
         y = T.reshape(y, [y.size, 1])
     if isinstance(y, np.ndarray):
-        y = T.TensorVariable(y, y.shape)
+        y = T.as_tensor_variable(y)
 
     # z-scores of every feature for both x and y
     zx = (x - T.mean(x, 0, keepdims=True))/T.std(x, 0, keepdims=True)
